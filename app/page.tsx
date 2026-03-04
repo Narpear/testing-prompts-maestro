@@ -139,9 +139,8 @@ export default function Page() {
   const resolvedSelected = selectedBase ? resolveIntentKey(selectedBase, hasImage) : "";
 
   const grouped = {
-    garment:  INTENTS.filter((i) => i.group === "garment"),
-    swatch:   INTENTS.filter((i) => i.group === "swatch"),
-    fallback: INTENTS.filter((i) => i.group === "fallback"),
+    main:     INTENTS.filter((i) => i.key !== "OUT_OF_INTENT"),
+    fallback: INTENTS.filter((i) => i.key === "OUT_OF_INTENT"),
   };
 
   return (
@@ -352,14 +351,9 @@ export default function Page() {
                 }}
               >
                 <option value="">Auto-detect intent</option>
-                <optgroup label="── Garment & Product ──">
-                  {grouped.garment.map((i) => (
+                <optgroup label="── Intents ──">
+                  {grouped.main.map((i) => (
                     <option key={i.key} value={i.key}>{i.label}{i.hasI2i ? " (+i2i)" : ""}</option>
-                  ))}
-                </optgroup>
-                <optgroup label="── Swatch / Prints ──">
-                  {grouped.swatch.map((i) => (
-                    <option key={i.key} value={i.key}>{i.label}</option>
                   ))}
                 </optgroup>
                 <optgroup label="── Fallback ──">
