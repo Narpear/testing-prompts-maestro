@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { INTENTS, INTENT_DESCRIPTIONS, resolveIntentKey } from "@/lib/intents";
+import { INTENTS, resolveIntentKey } from "@/lib/intents";
 
 const BASE_KEYS = INTENTS.map((i) => i.key);
 
@@ -13,8 +13,6 @@ export async function POST(req: NextRequest) {
     const genai = new GoogleGenerativeAI(apiKey);
     const model = genai.getGenerativeModel({ model: "gemini-2.0-flash" });
 
-    const intentList = BASE_KEYS.map((k) => `- ${k}: ${INTENT_DESCRIPTIONS[k] ?? ""}`).join("\n");
-
     const classifyPrompt = `You are an expert at classifying fashion and product image generation requests.
 
 Classify the user's request into EXACTLY ONE intent from the list below.
@@ -23,44 +21,34 @@ USER PROMPT: "${prompt}"
 USER HAS PROVIDED AN INPUT IMAGE: ${hasImage}
 
 AVAILABLE INTENTS:
-${intentList}
+- ON_BODY_PHOTOREALISTIC: garment worn by a real human model, editorial or e-commerce on-body photography
+- STUDIO_PRODUCT_PHOTOREALISTIC: isolated garment on clean studio background, no model, product shot
+- FLAT_LAY_PHOTOREALISTIC: garment laid flat on a surface, photographed from directly overhead
+- GHOST_MANNEQUIN_RENDER: garment on an invisible body showing interior structure, fit, and cut
+- TECHNICAL_SKETCH_BW: new B&W flat technical drawing from a text description — seams, pockets, closures
+- STYLE_TO_TECHNICAL_SKETCH: convert an existing reference photo or style image into a technical line drawing
+- PRINT_PATTERN_SEAMLESS: seamless tileable fabric print or pattern — no garments, no models
+- GRAPHIC_PLACEMENT_2D: flat 2D graphic or placement print design, screen print or digital print ready
+- MATERIAL_APPLICATION_TO_SKETCH: apply a specified fabric texture to an existing garment sketch
+- PRINT_APPLICATION_TO_GARMENT: apply a print or pattern onto an existing garment image
+- IMAGE_EDITING_OUTPAINT: extend, expand, replace background, or clean up an existing fashion image
+- IMAGE_VARIATION_FROM_REFERENCE: variation of a reference image — changing colour, fabric, or styling while preserving composition
+- OUT_OF_INTENT: does not clearly match any of the above
 
 CLASSIFICATION RULES:
-- FLAT_LAY_PHOTOREALISTIC: photographic-style flat lay shot on a real surface
-- FLAT_LAY_RENDER: CGI/rendered/digital flat lay
-- GHOST_MANNEQUIN_RENDER: invisible/ghost mannequin presentation
-- GRAPHIC_PLACEMENT_2D: logo, graphic, or text placement on a garment template
-- IMAGE_EDITING_OUTPAINT: extend, expand, or fill a region of an image
-- IMAGE_VARIATION_FROM_REFERENCE: changed version of a reference — NOT a swatch-specific operation
-- MATERIAL_APPLICATION_TO_SKETCH: user has a sketch, wants fabric/material applied
-- ON_BODY_PHOTOREALISTIC: garment shown being worn on a model/person
-- PRINT_APPLICATION_TO_GARMENT: specific print or pattern placed onto a garment
-- PRINT_PATTERN_SEAMLESS: create a brand-new seamless repeat pattern from scratch
-- STUDIO_PRODUCT_PHOTOREALISTIC: clean studio product shot (no model)
-- STYLE_TO_TECHNICAL_SKETCH: convert existing fashion image into technical linework
-- TECHNICAL_SKETCH_BW: new technical flat sketch from a text description
-- SWATCH_BACKGROUND_CHANGE: change only the background/ground color of a swatch
-- SWATCH_COLORWAY_INVERT: swap background and motif colors
-- SWATCH_COLORWAY_TONAL: convert to single-hue tonal/monochromatic palette
-- SWATCH_DENSITY_CHANGE: motifs more packed or more spread out/airy
-- SWATCH_DISTRESS_EFFECT: worn, aged, faded, or distressed look on a swatch
-- SWATCH_MOTIF_ADD: add a new element or motif to an existing swatch
-- SWATCH_MOTIF_REMOVE: remove a specific element from an existing swatch
-- SWATCH_OUTLINE_ADD: outlines added around motifs in a swatch
-- SWATCH_PLACEMENT_CONVERT: convert repeat swatch into a placement/engineered print
-- SWATCH_RECOLOR: change the colors or colorway of a swatch
-- SWATCH_REPEAT_TYPE_CHANGE: change the repeat structure (half-drop, brick, diamond, etc.)
-- SWATCH_RESIZE_ELEMENT: a specific motif/element made larger or smaller
-- SWATCH_SCALE_OVERALL: entire repeat scaled up (larger motifs) or down (smaller/ditsy)
-- SWATCH_STYLE_REWORK: swatch re-rendered in a different artistic style
-- SWATCH_TEXTURE_OVERLAY: how a swatch looks on a specific fabric texture
-- SWATCH_TILING: swatch tiled into a fabric repeat (3x3, 5x5, diagonal, etc.)
-- SWATCH_VARIANT: thematic variation of an existing swatch (same family, different elements)
-- OUT_OF_INTENT: none of the above clearly applies
+- If the user provides an image and wants it converted to a line drawing → STYLE_TO_TECHNICAL_SKETCH
+- If the user wants a new sketch from a text description only → TECHNICAL_SKETCH_BW
+- If the user wants a garment worn on a person → ON_BODY_PHOTOREALISTIC
+- If the user wants a garment shot with no person → STUDIO_PRODUCT_PHOTOREALISTIC
+- If the user wants overhead flat garment → FLAT_LAY_PHOTOREALISTIC
+- If the user wants invisible mannequin → GHOST_MANNEQUIN_RENDER
+- If the user wants a fabric/print pattern with no garment → PRINT_PATTERN_SEAMLESS
+- If the user wants a print applied onto a garment → PRINT_APPLICATION_TO_GARMENT
+- If the user wants to extend or modify an existing image → IMAGE_EDITING_OUTPAINT
+- If the user wants a variation of a reference with specific changes → IMAGE_VARIATION_FROM_REFERENCE
+- When in doubt between IMAGE_VARIATION_FROM_REFERENCE and any other intent, prefer the more specific intent
 
-SWATCH INTENT PRIORITY: If the user mentions "swatch", "print", "pattern", or "fabric tile" AND wants to modify it, always prefer a SWATCH_ intent over IMAGE_VARIATION_FROM_REFERENCE.
-
-Return ONLY the intent key exactly as written. No explanation.`;
+Return ONLY the intent key exactly as written (e.g. "ON_BODY_PHOTOREALISTIC"). No explanation.`;
 
     const result = await model.generateContent(classifyPrompt);
     const raw = result.response.text().trim().toUpperCase().replace(/\s+/g, "_");
