@@ -8,7 +8,7 @@ import {
   resolveIntentKey,
 } from "@/lib/intents";
 
-type Mode = "text" | "image";
+type Mode = "text" | "image1" | "image2" | "image3";
 type Step = "idle" | "classifying" | "enhancing" | "generating" | "done" | "error";
 
 interface RunState {
@@ -30,58 +30,95 @@ const STEP_LABEL: Record<Step, string> = {
   generating: "Generating…", done: "Done", error: "Error",
 };
 
+const MODE_IMAGE_COUNT: Record<Mode, number> = {
+  text: 0, image1: 1, image2: 2, image3: 3,
+};
+
+const MODE_LABELS: Record<Mode, string> = {
+  text: "Text only", image1: "1 Image", image2: "2 Images", image3: "3 Images",
+};
+
 export default function Page() {
   const [mode, setMode]                   = useState<Mode>("text");
   const [userPrompt, setUserPrompt]       = useState("");
   const [enhancement, setEnhancement]     = useState("");
   const [selectedBase, setSelectedBase]   = useState("");
   const [override, setOverride]           = useState(false);
-  const [inputImg, setInputImg]           = useState<string | null>(null);
-  const [isDragging, setIsDragging]       = useState(false);
+  // Always track up to 3 image slots
+  const [inputImgs, setInputImgs]         = useState<(string | null)[]>([null, null, null]);
+  const [isDragging, setIsDragging]       = useState<number | null>(null);
   const [run, setRun]                     = useState<RunState>(INITIAL);
-  const fileRef                           = useRef<HTMLInputElement>(null);
+  const fileRefs                          = [
+    useRef<HTMLInputElement>(null),
+    useRef<HTMLInputElement>(null),
+    useRef<HTMLInputElement>(null),
+  ];
+
+  const imageCount   = MODE_IMAGE_COUNT[mode];
+  const hasAnyImage  = imageCount > 0;
+  const activeImages = inputImgs.slice(0, imageCount);
 
   const loadEnhancement = useCallback((intentKey: string) => {
     setEnhancement(getEnhancementPrompt(intentKey));
   }, []);
 
-  const handleImageFile = (file: File) => {
+  const handleImageFile = (file: File, slot: number) => {
     if (!file.type.startsWith("image/")) return;
     const reader = new FileReader();
-    reader.onload = (e) => setInputImg(e.target?.result as string);
+    reader.onload = (e) => {
+      setInputImgs((prev) => {
+        const next = [...prev];
+        next[slot] = e.target?.result as string;
+        return next;
+      });
+    };
     reader.readAsDataURL(file);
   };
 
-  const clearImage = () => {
-    setInputImg(null);
-    if (fileRef.current) fileRef.current.value = "";
+  const clearImage = (slot: number) => {
+    setInputImgs((prev) => {
+      const next = [...prev];
+      next[slot] = null;
+      return next;
+    });
+    if (fileRefs[slot].current) fileRefs[slot].current!.value = "";
+  };
+
+  const clearAllImages = () => {
+    setInputImgs([null, null, null]);
+    fileRefs.forEach((r) => { if (r.current) r.current.value = ""; });
+  };
+
+  const handleModeChange = (m: Mode) => {
+    setMode(m);
+    if (m === "text") clearAllImages();
   };
 
   const handleIntentOverride = (base: string) => {
     setSelectedBase(base);
     setOverride(!!base);
     if (base) {
-      const resolved = resolveIntentKey(base, mode === "image" && !!inputImg);
+      const resolved = resolveIntentKey(base, hasAnyImage);
       loadEnhancement(resolved);
     }
   };
 
   const handleRun = async () => {
     if (!userPrompt.trim()) return;
-    const hasImage = mode === "image" && !!inputImg;
+    const imagesForRun = activeImages.filter(Boolean) as string[];
 
     setRun({ ...INITIAL, step: "classifying" });
 
     try {
       // 1 — Classify
       let baseIntent = selectedBase;
-      let intentKey  = selectedBase ? resolveIntentKey(selectedBase, hasImage) : "";
+      let intentKey  = selectedBase ? resolveIntentKey(selectedBase, hasAnyImage) : "";
 
       if (!override || !selectedBase) {
         const r = await fetch("/api/classify", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt: userPrompt, hasImage }),
+          body: JSON.stringify({ prompt: userPrompt, imageCount: imagesForRun.length }),
         });
         const d = await r.json();
         if (d.error) throw new Error(d.error);
@@ -110,7 +147,10 @@ export default function Page() {
       const gr = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enhancedPrompt: ed.enhanced, inputImageBase64: hasImage ? inputImg : null }),
+        body: JSON.stringify({
+          enhancedPrompt: ed.enhanced,
+          inputImagesBase64: imagesForRun.length > 0 ? imagesForRun : null,
+        }),
       });
       const gd = await gr.json();
       if (gd.error) throw new Error(gd.error);
@@ -133,10 +173,16 @@ export default function Page() {
     a.click();
   };
 
-  const isRunning = ["classifying", "enhancing", "generating"].includes(run.step);
-  const hasResult = run.step === "done";
-  const hasImage  = mode === "image" && !!inputImg;
-  const resolvedSelected = selectedBase ? resolveIntentKey(selectedBase, hasImage) : "";
+  const isRunning       = ["classifying", "enhancing", "generating"].includes(run.step);
+  const hasResult       = run.step === "done";
+  const resolvedSelected = selectedBase ? resolveIntentKey(selectedBase, hasAnyImage) : "";
+
+  // Grid for Row 1 — input slots + arrow + output
+  const inputGridCols = (() => {
+    if (!hasAnyImage) return "1fr";
+    const inputCols = Array(imageCount).fill("1fr").join(" ");
+    return `${inputCols} 48px 1fr`;
+  })();
 
   const grouped = {
     main:     INTENTS.filter((i) => i.key !== "OUT_OF_INTENT"),
@@ -163,8 +209,8 @@ export default function Page() {
 
           {/* Mode toggle */}
           <div style={{ display: "flex", gap: 2, padding: 3, borderRadius: 99, background: "var(--bg)", border: "1px solid var(--border)" }}>
-            {(["text", "image"] as Mode[]).map((m) => (
-              <button key={m} onClick={() => { setMode(m); if (m === "text") clearImage(); }}
+            {(["text", "image1", "image2", "image3"] as Mode[]).map((m) => (
+              <button key={m} onClick={() => handleModeChange(m)}
                 style={{
                   padding: "5px 16px", borderRadius: 99, fontSize: 12, fontFamily: "'DM Sans'",
                   background: mode === m ? "var(--card)" : "transparent",
@@ -173,7 +219,7 @@ export default function Page() {
                   boxShadow: mode === m ? "0 1px 2px rgba(0,0,0,0.06)" : "none",
                   cursor: "pointer", transition: "all 0.15s",
                 }}>
-                {m === "text" ? "Text only" : "Image + Text"}
+                {MODE_LABELS[m]}
               </button>
             ))}
           </div>
@@ -185,47 +231,62 @@ export default function Page() {
         {/* ── Row 1: Images ── */}
         <div style={{
           display: "grid",
-          gridTemplateColumns: mode === "image" ? "1fr 48px 1fr" : "1fr",
+          gridTemplateColumns: inputGridCols,
           gap: 12, marginBottom: 16,
         }}>
-          {mode === "image" && (
+          {hasAnyImage && (
             <>
-              {/* Input image */}
-              <div>
-                <SectionLabel>Input Image</SectionLabel>
-                <div
-                  className={isDragging ? "drop-zone-active" : ""}
-                  onClick={() => !inputImg && fileRef.current?.click()}
-                  onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-                  onDragLeave={() => setIsDragging(false)}
-                  onDrop={(e) => { e.preventDefault(); setIsDragging(false); const f = e.dataTransfer.files[0]; if (f) handleImageFile(f); }}
-                  style={{
-                    borderRadius: 14, overflow: "hidden", cursor: inputImg ? "default" : "pointer",
-                    border: "1.5px dashed var(--border)", background: "var(--card)",
-                    aspectRatio: "4/3", position: "relative", transition: "all 0.15s",
-                  }}>
-                  {inputImg ? (
-                    <>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={inputImg} alt="input" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
-                      <button onClick={(e) => { e.stopPropagation(); clearImage(); }}
-                        style={{
-                          position: "absolute", top: 10, right: 10, width: 26, height: 26,
-                          borderRadius: "50%", background: "var(--ink)", color: "white",
-                          border: "none", cursor: "pointer", fontSize: 14, display: "flex",
-                          alignItems: "center", justifyContent: "center",
-                        }}>×</button>
-                    </>
-                  ) : (
-                    <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8 }}>
-                      <UploadIcon />
-                      <span style={{ fontSize: 11, color: "var(--ink-faint)", fontFamily: "'DM Sans'" }}>Drop or click to upload</span>
-                    </div>
-                  )}
+              {/* Input image slots */}
+              {Array.from({ length: imageCount }).map((_, slot) => (
+                <div key={slot}>
+                  <SectionLabel>
+                    {imageCount === 1 ? "Input Image" : `Input Image ${slot + 1}`}
+                  </SectionLabel>
+                  <div
+                    className={isDragging === slot ? "drop-zone-active" : ""}
+                    onClick={() => !inputImgs[slot] && fileRefs[slot].current?.click()}
+                    onDragOver={(e) => { e.preventDefault(); setIsDragging(slot); }}
+                    onDragLeave={() => setIsDragging(null)}
+                    onDrop={(e) => {
+                      e.preventDefault(); setIsDragging(null);
+                      const f = e.dataTransfer.files[0]; if (f) handleImageFile(f, slot);
+                    }}
+                    style={{
+                      borderRadius: 14, overflow: "hidden",
+                      cursor: inputImgs[slot] ? "default" : "pointer",
+                      border: "1.5px dashed var(--border)", background: "var(--card)",
+                      aspectRatio: "4/3", position: "relative", transition: "all 0.15s",
+                    }}>
+                    {inputImgs[slot] ? (
+                      <>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={inputImgs[slot]!} alt={`input ${slot + 1}`} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+                        <button onClick={(e) => { e.stopPropagation(); clearImage(slot); }}
+                          style={{
+                            position: "absolute", top: 10, right: 10, width: 26, height: 26,
+                            borderRadius: "50%", background: "var(--ink)", color: "white",
+                            border: "none", cursor: "pointer", fontSize: 14, display: "flex",
+                            alignItems: "center", justifyContent: "center",
+                          }}>×</button>
+                      </>
+                    ) : (
+                      <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                        <UploadIcon />
+                        <span style={{ fontSize: 11, color: "var(--ink-faint)", fontFamily: "'DM Sans'" }}>
+                          {imageCount > 1 ? `Image ${slot + 1} — drop or click` : "Drop or click to upload"}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  <input
+                    ref={fileRefs[slot]}
+                    type="file"
+                    accept="image/*"
+                    style={{ display: "none" }}
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImageFile(f, slot); }}
+                  />
                 </div>
-                <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }}
-                  onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImageFile(f); }} />
-              </div>
+              ))}
 
               {/* Arrow */}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "center", paddingTop: 28 }}>
@@ -254,7 +315,7 @@ export default function Page() {
             <div style={{
               borderRadius: 14, overflow: "hidden", position: "relative",
               border: "1.5px solid var(--border)", background: "var(--card)",
-              aspectRatio: mode === "image" ? "4/3" : "21/8",
+              aspectRatio: hasAnyImage ? "4/3" : "21/8",
               minHeight: 220,
             }}>
               {isRunning && (
@@ -417,7 +478,7 @@ export default function Page() {
             display: "grid", gridTemplateColumns: "auto 1fr", rowGap: 6, columnGap: 20,
           }}>
             <LogRow label="intent" value={run.intentKey} mono />
-            <LogRow label="mode" value={hasImage ? "i2i" : "t2i"} mono />
+            <LogRow label="mode" value={`${hasAnyImage ? "i2i" : "t2i"} · ${imageCount} image${imageCount !== 1 ? "s" : ""}`} mono />
             <LogRow label="description" value={INTENT_DESCRIPTIONS[run.baseIntent] ?? "—"} />
           </div>
         )}
@@ -452,7 +513,6 @@ function PromptPanel({
       border: `1.5px solid ${accent ? "var(--accent-border)" : "var(--border)"}`,
       background: "var(--card)",
     }}>
-      {/* Header */}
       <div style={{
         padding: "10px 14px", borderBottom: "1px solid var(--border-soft)",
         background: accent ? "var(--accent-pale)" : "transparent",
@@ -473,8 +533,6 @@ function PromptPanel({
             }}>copy</button>
         )}
       </div>
-
-      {/* Body */}
       <div style={{ position: "relative", flex: 1 }}>
         {loading && <div className="shimmer" style={{ position: "absolute", inset: 0 }} />}
         <textarea

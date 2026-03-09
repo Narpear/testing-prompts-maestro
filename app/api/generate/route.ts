@@ -4,18 +4,21 @@ export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   try {
-    const { enhancedPrompt, inputImageBase64 } = await req.json();
+    const { enhancedPrompt, inputImagesBase64 } = await req.json();
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) return NextResponse.json({ error: "GEMINI_API_KEY not set" }, { status: 500 });
 
-    const hasImage = !!inputImageBase64;
+    const images: string[] = Array.isArray(inputImagesBase64)
+      ? inputImagesBase64.filter(Boolean)
+      : [];
+
     const parts: object[] = [];
 
-    if (hasImage) {
-      const raw = inputImageBase64.includes(",") ? inputImageBase64.split(",")[1] : inputImageBase64;
-      const mimeType = inputImageBase64.startsWith("data:image/png")
+    for (const img of images) {
+      const raw = img.includes(",") ? img.split(",")[1] : img;
+      const mimeType = img.startsWith("data:image/png")
         ? "image/png"
-        : inputImageBase64.startsWith("data:image/webp")
+        : img.startsWith("data:image/webp")
         ? "image/webp"
         : "image/jpeg";
       parts.push({ inline_data: { mime_type: mimeType, data: raw } });
@@ -57,7 +60,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Gemini returned no image. Check API quota or prompt." }, { status: 500 });
     }
 
-    return NextResponse.json({ imageBase64, mimeType, mode: hasImage ? "i2i" : "t2i" });
+    return NextResponse.json({ imageBase64, mimeType, mode: images.length > 0 ? "i2i" : "t2i" });
   } catch (err) {
     console.error(err);
     return NextResponse.json({ error: String(err) }, { status: 500 });

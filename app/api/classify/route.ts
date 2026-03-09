@@ -6,7 +6,9 @@ const BASE_KEYS = INTENTS.map((i) => i.key);
 
 export async function POST(req: NextRequest) {
   try {
-    const { prompt, hasImage } = await req.json();
+    const { prompt, imageCount } = await req.json();
+    const hasImage = (imageCount ?? 0) > 0;
+
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) return NextResponse.json({ error: "GEMINI_API_KEY not set" }, { status: 500 });
 
@@ -18,7 +20,7 @@ export async function POST(req: NextRequest) {
 Classify the user's request into EXACTLY ONE intent from the list below.
 
 USER PROMPT: "${prompt}"
-USER HAS PROVIDED AN INPUT IMAGE: ${hasImage}
+USER HAS PROVIDED INPUT IMAGES: ${hasImage} (count: ${imageCount ?? 0})
 
 AVAILABLE INTENTS:
 - ON_BODY_PHOTOREALISTIC: garment worn by a real human model, editorial or e-commerce on-body photography
